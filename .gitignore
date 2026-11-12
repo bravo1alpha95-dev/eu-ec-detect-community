@@ -1,0 +1,17 @@
+.env
+.env.*
+*.env
+!.env.example
+*.pem
+*.key
+id_rsa
+id_ed25519
+*.kdbx
+reports/
+__pycache__/
+*.pyc
+*.log
+*.pcap
+.pytest_cache/
+.venv/
+venv/

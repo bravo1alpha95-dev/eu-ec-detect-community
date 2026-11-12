@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: bash -n, ShellCheck, pytest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Bash syntax
+        run: |
+          set -euo pipefail
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: ShellCheck
+        run: shellcheck -x scripts/*.sh
+
+      - name: Confirm entrypoints are executable
+        run: |
+          set -euo pipefail
+          for s in 00_preflight.sh 10_collect.sh 20_apply.sh anomaly-checks.sh easy-run.sh; do
+            test -x "scripts/$s"
+          done
+
+      - name: Regression tests
+        run: python3 tests/test_regressions.py && python3 tests/test_community_hygiene.py

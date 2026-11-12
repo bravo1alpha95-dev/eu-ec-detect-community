@@ -1,0 +1,8 @@
+title = "EmpowerU allowlist"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic PEM fixture used by redaction regressions (literal body is the word fake, not a key)"
+paths = ['''(^|/)tests/test_regressions\.py$''']
