@@ -79,5 +79,5 @@ GitHub Actions runs the same checks on every push and pull request.
 ## License and security
 
 - Licensed under the [Apache License 2.0](LICENSE). Copyright 2026 EmpowerU LLC.
-- Vulnerability reports: see [SECURITY.md](SECURITY.md). Use `[CONTACT EMAIL]` until a dedicated address is published.
+- Vulnerability reports: see [SECURITY.md](SECURITY.md). Use bravo1alpha95@gmail.com.
 - Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
