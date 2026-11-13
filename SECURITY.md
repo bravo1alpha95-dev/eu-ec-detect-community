@@ -4,7 +4,7 @@ Defensive toolkit for **owned systems only**. Read-only by default. Residual ris
 
 ## Reporting vulnerabilities
 
-Please report security issues privately to **[CONTACT EMAIL]**. Do not open a public issue for a vulnerability, and do not attach production evidence, secrets, or personally identifiable information.
+Please report security issues privately to **bravo1alpha95@gmail.com**. Do not open a public issue for a vulnerability, and do not attach production evidence, secrets, or personally identifiable information.
 
 This is a community edition. There is no published SLA for response times. Describe the issue, the affected script or path, and a safe way to reproduce it with synthetic data.
 
