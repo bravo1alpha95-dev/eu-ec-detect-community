@@ -31,8 +31,10 @@ class Regressions(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         # Explicit PATH excludes ss; never rely on the host's listener state.
+        # Include tail: collect/anomaly read host auth logs with tail when those
+        # files are readable, which is true on typical CI images.
         for cmd in ("bash dirname date hostname id mkdir chmod mktemp rm mv basename "
-                    "awk wc cat sed head sort diff sha256sum cut cp stat grep tee").split():
+                    "awk wc cat sed head tail sort diff sha256sum cut cp stat grep tee").split():
             (self.bin / cmd).symlink_to(shutil.which(cmd))
         for cmd in ("getent", "last", "lastb", "dpkg", "apt-config"):
             self.stub(cmd, "exit 0")
