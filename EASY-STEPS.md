@@ -27,7 +27,7 @@ Goal: Minimal daily or weekly effort while generating usable evidence and baseli
 1. Deploy a Wazuh agent on each owned production host (or start in a lab you own).
    - The manager can live on a dedicated host or the operator.
    - Agents can report auth events, processes, file integrity, and vulnerabilities.
-   - Use the companion pack [eu-wazuh-detections](https://github.com/bravo1alpha95-dev/eu-wazuh-detections) for starter custom rules. Those rules have not been tested with `wazuh-logtest` against a live manager in this project.
+   - Use the companion pack [eu-wazuh-detections](https://github.com/bravo1alpha95-dev/eu-wazuh-detections) for starter custom rules. Those rules were tested with `wazuh-logtest` and a live manager on Wazuh 4.14.10 only; validate them on your own manager and version.
    - The [eu-monitor-installer](https://github.com/bravo1alpha95-dev/eu-monitor-installer) can copy this toolkit (and optionally the rules) onto a host. It is dry-run by default.
 2. Optional: add a network sensor such as Suricata if you have authorized network visibility.
 3. For threat-intel enrichment of indicators you already possess (hashes from alerts, and similar), use a separate authorized lookup that reads credentials from environment variables only. Do not hardcode keys.
