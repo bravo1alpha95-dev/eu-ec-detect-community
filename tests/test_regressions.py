@@ -11,6 +11,15 @@ import tempfile
 import unittest
 
 ROOT = Path(os.environ.get("EU_TEST_ROOT", Path(__file__).resolve().parents[1]))
+
+
+def require_cmd(name):
+    path = shutil.which(name)
+    if path is None:
+        raise ValueError(f"Required command {name!r} was not found on PATH")
+    return path
+
+
 ENTRYPOINTS = ("00_preflight.sh", "10_collect.sh", "20_apply.sh", "anomaly-checks.sh", "easy-run.sh")
 
 
@@ -35,7 +44,7 @@ class Regressions(unittest.TestCase):
         # files are readable, which is true on typical CI images.
         for cmd in ("bash dirname date hostname id mkdir chmod mktemp rm mv basename "
                     "awk wc cat sed head tail sort diff sha256sum cut cp stat grep tee").split():
-            (self.bin / cmd).symlink_to(shutil.which(cmd))
+            (self.bin / cmd).symlink_to(require_cmd(cmd))
         for cmd in ("getent", "last", "lastb", "dpkg", "apt-config"):
             self.stub(cmd, "exit 0")
         self.stub("hostname", "echo eu-test-host")
@@ -187,7 +196,7 @@ class Regressions(unittest.TestCase):
     @unittest.skipUnless(shutil.which("shasum"), "shasum fallback not installed")
     def test_checksum_shasum_fallback(self):
         (self.bin / "sha256sum").unlink()
-        (self.bin / "shasum").symlink_to(shutil.which("shasum"))
+        (self.bin / "shasum").symlink_to(require_cmd("shasum"))
         self.stub("ss", "exit 0")
         self.assertEqual(self.run_script("anomaly-checks.sh").returncode, 0)
         self.assertEqual(self.run_script("anomaly-checks.sh").returncode, 0)
