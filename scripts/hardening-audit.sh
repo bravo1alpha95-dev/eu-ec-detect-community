@@ -92,12 +92,16 @@ ssh_lines() {
     if [[ "$kw" == match ]]; then
       break
     elif [[ "$kw" == include && $depth -lt 2 ]]; then
-      for inc in $rest; do
+      # Split without globbing: patterns must expand under EU_AUDIT_ROOT,
+      # never against the host's own /etc.
+      local -a incs=()
+      read -r -a incs <<< "$rest"
+      for inc in "${incs[@]}"; do
         [[ "$inc" == /* ]] || inc="/etc/ssh/$inc"
         [[ "$inc" == *..* ]] && continue
         local f
         for f in $(p "$inc"); do
-          [[ -e "$f" ]] && ssh_lines "$f" $((depth + 1))
+          if [[ -e "$f" ]]; then ssh_lines "$f" $((depth + 1)); fi
         done
       done
     else
