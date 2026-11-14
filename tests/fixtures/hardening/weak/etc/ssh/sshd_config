@@ -1,0 +1,5 @@
+# Fixture: weak OpenSSH server config (synthetic, for tests only).
+PermitRootLogin yes
+PasswordAuthentication yes
+Protocol 2,1
+MaxAuthTries 6

@@ -1,0 +1,2 @@
+# Synthetic entry with an address and email the report must redact
+ops-bot ALL=(ALL) NOPASSWD: /usr/bin/systemctl # owner ops@example.com from 203.0.113.7

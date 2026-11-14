@@ -1,0 +1,4 @@
+# Fixture sudoers (synthetic)
+root ALL=(ALL:ALL) ALL
+%admin ALL=(ALL) NOPASSWD: ALL
+#includedir /etc/sudoers.d

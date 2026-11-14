@@ -1,0 +1,2 @@
+# sudo ignores file names containing a dot, so this entry is not active:
+deploy ALL=(ALL) NOPASSWD: ALL
