@@ -54,9 +54,8 @@ ROLE=$(sanitize_name "${ROLE:-ops}")
 FINDINGS=$(mktemp "${TMPDIR:-/tmp}/eu-hardening.XXXXXX")
 TMPTXT=""
 TMPJSON=""
-# shellcheck disable=SC2317  # invoked via trap
-cleanup() { rm -f "$FINDINGS" ${TMPTXT:+"$TMPTXT"} ${TMPJSON:+"$TMPJSON"}; }
-trap cleanup EXIT
+# Temporary findings and unpublished report files are always removed.
+trap 'rm -f "$FINDINGS" ${TMPTXT:+"$TMPTXT"} ${TMPJSON:+"$TMPJSON"}' EXIT
 set -E
 trap 'echo "[hardening] ERROR: operational failure at line $LINENO; no complete report published" >&2; exit 3' ERR
 
