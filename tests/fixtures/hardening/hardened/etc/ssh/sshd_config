@@ -1,0 +1,13 @@
+# Fixture: hardened OpenSSH server config (synthetic, for tests only).
+Include /etc/ssh/sshd_config.d/*.conf
+Port 22
+PermitRootLogin yes
+PubkeyAuthentication yes
+PasswordAuthentication no
+Protocol 2
+MaxAuthTries 3
+
+# Settings inside a Match block are conditional and must not count as global.
+Match User backup
+    PermitRootLogin yes
+    MaxAuthTries 10

@@ -1,0 +1,6 @@
+# Fixture sudoers (synthetic). A commented example must not count:
+# %wheel ALL=(ALL) NOPASSWD: ALL
+Defaults env_reset
+root ALL=(ALL:ALL) ALL
+%sudo ALL=(ALL:ALL) ALL
+#includedir /etc/sudoers.d

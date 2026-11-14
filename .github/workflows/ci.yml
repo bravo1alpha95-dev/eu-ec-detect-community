@@ -32,9 +32,9 @@ jobs:
       - name: Confirm entrypoints are executable
         run: |
           set -euo pipefail
-          for s in 00_preflight.sh 10_collect.sh 20_apply.sh anomaly-checks.sh easy-run.sh; do
+          for s in 00_preflight.sh 10_collect.sh 20_apply.sh anomaly-checks.sh easy-run.sh hardening-audit.sh; do
             test -x "scripts/$s"
           done
 
       - name: Regression tests
-        run: python3 tests/test_regressions.py && python3 tests/test_community_hygiene.py
+        run: python3 tests/test_regressions.py && python3 tests/test_community_hygiene.py && python3 tests/test_hardening_audit.py

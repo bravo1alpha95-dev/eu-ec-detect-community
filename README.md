@@ -50,8 +50,36 @@ Set `Status: AUTHORIZED` in `scope/roe.md` only after every `(fill)` field is co
 | `scripts/00_preflight.sh` | Checks tools, permissions, `.env`, and ROE; creates `reports/` |
 | `scripts/10_collect.sh` | Read-only evidence collection (users, listeners, logins, SSH/sudo excerpts) |
 | `scripts/anomaly-checks.sh` | Compares current listeners to a per-host baseline with a checksum sidecar |
+| `scripts/hardening-audit.sh` | Read-only CIS-style hardening audit (SSH, sudoers, firewall, permissions, updates, auditd, password aging) with PASS / WARN / FAIL output |
 | `scripts/20_apply.sh` | Dry-run scaffolding for a Wazuh agent; mutates only with `CONFIRM=yes` and a valid ROE |
 | `scripts/lib.sh` | Shared helpers: env parsing, redaction, ROE gate, path guards, JSON escaping |
+
+## Hardening audit
+
+`scripts/hardening-audit.sh` checks a subset of common CIS-benchmark-style items and prints one `PASS`, `WARN`, or `FAIL` line per finding. It is **read-only**: it has no apply mode, ignores `CONFIRM`, and only reads files and runs status queries (`ufw status`, `firewall-cmd --state`, `nft list ruleset`, `systemctl is-active` / `is-enabled`). Run it as root for complete results; anything it cannot read is reported as `WARN`, not guessed.
+
+```bash
+sudo ./scripts/hardening-audit.sh                     # findings + redacted report in reports/
+EU_AUDIT_NO_REPORT=yes ./scripts/hardening-audit.sh   # print only; write nothing
+EU_AUDIT_FAIL_ON=fail ./scripts/hardening-audit.sh    # exit 2 if any FAIL (for CI or cron)
+```
+
+| Area | PASS | WARN | FAIL |
+|---|---|---|---|
+| SSH `PermitRootLogin` | `no` | `prohibit-password` and similar, or unset | `yes` |
+| SSH `PasswordAuthentication` | `no` | `yes` or unset (OpenSSH default is yes) | — |
+| SSH `Protocol` | `2` or unset | unrecognized value | includes `1` |
+| SSH `MaxAuthTries` | 4 or less | more than 4, or unset (default 6) | — |
+| sudoers `NOPASSWD` | none in `/etc/sudoers` or `/etc/sudoers.d/` | one or more (each listed, redacted) | — |
+| Firewall | ufw active, firewalld running, or an nftables `input` hook | tools missing, or not root | none active (as root) |
+| World-writable paths in `/etc`, `/bin`, `/sbin`, `/usr/bin`, `/usr/sbin`, `/usr/local/bin`, `/usr/local/sbin` | none | — | any file, or any directory without the sticky bit |
+| Automatic updates | unattended-upgrades or dnf-automatic applying updates | missing or disabled | — |
+| auditd | service active | config present but state unknown (`EU_AUDIT_ROOT`) | installed but inactive, or not installed |
+| Password aging (`/etc/login.defs`) | `PASS_MAX_DAYS` ≤ 365, `PASS_MIN_DAYS` ≥ 1, `PASS_WARN_AGE` ≥ 7 | otherwise | — |
+
+The report (`reports/<role>-hardening-audit-<host>-<timestamp>.txt`) and its JSON summary (pass, warn, and fail counts) are written under `umask 077` to a `700` directory as `600` files, after redaction, and only once the audit completes. Exit codes: **0** audit completed, **2** FAIL findings with `EU_AUDIT_FAIL_ON=fail`, **3** operational error (no report published).
+
+`EU_AUDIT_ROOT=/mnt/image` audits the files of a mounted image or test fixture instead of `/`; live firewall and service checks are skipped in that mode. SSH parsing follows `Include` files and sshd's first-value-wins rule but does not evaluate `Match` blocks, so confirm SSH with `sudo sshd -T` before acting. This is a subset of CIS items, not a full benchmark or a compliance attestation.
 
 ## Evidence handling
 
@@ -70,9 +98,11 @@ Requires Bash, GNU sed, ShellCheck, and Python 3. Run from the repository root:
 for script in scripts/*.sh; do bash -n "$script" || exit; done
 shellcheck -x scripts/*.sh
 python3 tests/test_regressions.py
+python3 tests/test_hardening_audit.py
+python3 tests/test_community_hygiene.py
 ```
 
-Tests use private temporary fixtures and synthetic inputs, including missing or empty `ss`, symlinked output paths, invalid ROE, and secret-redaction examples. They do not install packages, restart services, download artifacts, or change host policy.
+Tests use private temporary fixtures and synthetic inputs, including missing or empty `ss`, symlinked output paths, invalid ROE, and secret-redaction examples. The hardening-audit tests run against fixture config trees in `tests/fixtures/hardening/` and stub commands that record their arguments, to confirm the audit never changes a file and only issues status queries. They do not install packages, restart services, download artifacts, or change host policy.
 
 GitHub Actions runs the same checks on every push and pull request.
 
