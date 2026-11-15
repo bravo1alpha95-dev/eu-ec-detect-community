@@ -16,6 +16,15 @@ import tempfile
 import unittest
 
 ROOT = Path(os.environ.get("EU_TEST_ROOT", Path(__file__).resolve().parents[1]))
+
+
+def require_cmd(name):
+    path = shutil.which(name)
+    if path is None:
+        raise ValueError(f"Required command {name!r} was not found on PATH")
+    return path
+
+
 FIXTURES = ROOT / "tests" / "fixtures" / "hardening"
 READ_ONLY_CALLS = {
     "ufw status",
@@ -54,7 +63,7 @@ class HardeningAudit(unittest.TestCase):
         self.bin.mkdir()
         for cmd in ("bash dirname date hostname id mkdir chmod mktemp rm mv basename "
                     "awk wc cat sed head tail sort cut cp stat grep find").split():
-            (self.bin / cmd).symlink_to(shutil.which(cmd))
+            (self.bin / cmd).symlink_to(require_cmd(cmd))
         self.stub("hostname", "echo eu-test-host")
         self.calls = Path(self.tmp.name) / "calls.log"
         self.env = dict(os.environ, PATH=str(self.bin), LC_ALL="C",
