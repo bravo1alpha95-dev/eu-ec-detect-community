@@ -43,8 +43,16 @@ def _sha256(value: str) -> str:
 def _candidates(text: str):
     lowered = text.lower()
     found = set()
-    for pattern in (_IP_PREFIX, _DOMAIN, _HYPHENATED, _FP_FRAG):
+    for pattern in (_IP_PREFIX, _FP_FRAG):
         found.update(pattern.findall(lowered))
+    # Markers are hostname prefixes (host-a matches host-a-01) and domain
+    # suffixes (example.internal matches web.example.internal).
+    for token in _HYPHENATED.findall(lowered):
+        parts = token.split("-")
+        found.update("-".join(parts[:i]) for i in range(1, len(parts) + 1))
+    for token in _DOMAIN.findall(lowered):
+        parts = token.split(".")
+        found.update(".".join(parts[i:]) for i in range(len(parts)))
     return found
 
 
@@ -73,6 +81,11 @@ class Hygiene(unittest.TestCase):
         hashed = {_sha256(candidate) for candidate in _candidates(f"prefix {token} suffix")}
         self.assertIn(digest, hashed)
         self.assertNotIn(digest, FORBIDDEN_HASHES)
+
+    def test_hasher_matches_marker_prefixes_and_suffixes(self):
+        found = _candidates("host-a-01 web.example.internal")
+        self.assertIn("host-a", found)
+        self.assertIn("example.internal", found)
 
     def test_no_internal_lab_or_secret_markers(self):
         hits = []
