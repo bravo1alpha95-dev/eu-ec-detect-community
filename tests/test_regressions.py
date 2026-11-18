@@ -234,6 +234,19 @@ class Regressions(unittest.TestCase):
         self.authorize()
         self.assertEqual(self.helper('roe_authorized "' + str(self.root / "scope/roe.md") + '"').returncode, 0)
 
+    def test_roe_status_must_be_one_exact_line(self):
+        # Every other field is filled, so only the Status line decides.
+        self.authorize()
+        roe = self.root / "scope/roe.md"
+        fields = roe.read_text().split("\n", 1)[1]
+        for status in ("Status: UNAUTHORIZED", "Status: NOT AUTHORIZED", "status: AUTHORIZED",
+                       "Status: authorized", "Notes: Status: AUTHORIZED", "Status: DRAFT (AUTHORIZED later)",
+                       "Status: AUTHORIZED\nStatus: AUTHORIZED", " Status: AUTHORIZED", "Status: AUTHORIZED!"):
+            roe.write_text(status + "\n" + fields)
+            self.assertNotEqual(self.helper('roe_authorized "' + str(roe) + '"').returncode, 0, status)
+        roe.write_text("Status: AUTHORIZED\n" + fields)
+        self.assertEqual(self.helper('roe_authorized "' + str(roe) + '"').returncode, 0)
+
     def test_one_line_pem_keeps_following_evidence(self):
         result = self.helper("redact", "-----BEGIN PRIVATE KEY----- fake -----END PRIVATE KEY-----\nafter-evidence\n")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -383,6 +396,57 @@ class Regressions(unittest.TestCase):
         self.assertEqual(self.run_script("anomaly-checks.sh").returncode, 0)
         baseline = self.root / "reports/baseline-listeners-eu-test-host.txt"
         self.assertEqual(baseline.read_text(), "tcp LISTEN 127.0.0.1:22\ntcp LISTEN [2001:db8::1]:443\nudp UNCONN *:53\n")
+
+    def ip_stub(self, addr):
+        data = self.root / "ip-addr"
+        data.write_text(addr)
+        self.stub("ip", 'case "$*" in "-o addr show") cat "' + str(data) + '" ;; *) exit 0 ;; esac')
+
+    def test_cidr_math_not_text_prefix(self):
+        cases = (("192.0.2.0/24", "192.0.20.0/24", 1), ("10.0.0.0/8", "10.20.0.0/16", 0),
+                 ("2001:db8::/32", "2001:db8:1::/48", 0), ("2001:db8::/32", "2001:db9::/32", 1),
+                 ("::ffff:10.0.0.0/120", "::ffff:10.0.0.9", 0), ("10.0.0.0/8", "2001:db8::/32", 1),
+                 ("0.0.0.0/0", "192.0.2.1", 0), ("10.0.0.0/33", "10.0.0.1", 2), ("$(id)", "10.0.0.1", 2))
+        for a, b, rc in cases:
+            self.assertEqual(self.helper(f"cidr_overlap '{a}' '{b}'").returncode, rc, (a, b))
+        self.assertEqual(self.helper("cidr_contains 10.0.0.0/24 10.0.0.0/16").returncode, 1)
+        self.assertEqual(self.helper("cidr_valid 1::2::3").returncode, 1)
+
+    def test_scope_check_advisory_and_fail_closed(self):
+        # .env.example scope is 10.0.0.0/24; 10.0.0.100 shares the text prefix "10.0.0.1".
+        self.ip_stub("1: lo inet 127.0.0.1/8 scope host lo\n2: eth0 inet 10.0.1.5/24 scope global eth0\n")
+        result = self.run_script("00_preflight.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("WARN: no address on this host is inside EU_SCOPE_CIDR", result.stdout)
+        result = self.run_script("00_preflight.sh", EU_FAIL_CLOSED="1")
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("EU_FAIL_CLOSED=1", result.stderr)
+        self.assertNotEqual(self.run_script("easy-run.sh", EU_FAIL_CLOSED="1").returncode, 0)
+        self.ip_stub("2: eth0 inet 10.0.0.100/24 scope global eth0\n")
+        result = self.run_script("00_preflight.sh", EU_FAIL_CLOSED="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("inside EU_SCOPE_CIDR", result.stdout)
+
+    def test_scope_check_without_ip_fails_closed_only_when_asked(self):
+        self.assertEqual(self.run_script("00_preflight.sh").returncode, 0)
+        result = self.run_script("00_preflight.sh", EU_FAIL_CLOSED="1")
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("scope unverified", result.stderr)
+
+    def test_env_list_values_and_no_substitution(self):
+        env = self.root / ".env"
+        canary = self.root / "canary"
+        env.write_text("EU_SCOPE_CIDR=10.0.0.0/24,2001:db8::/64\nEU_ORG=$(touch " + str(canary) + ")\nEU_ENV=`id`\n")
+        env.chmod(0o600)
+        result = self.helper('load_env "' + str(env) + '"; printf "%s|%s" "$EU_SCOPE_CIDR" "${EU_ORG:-unset}"')
+        self.assertEqual(result.stdout, "10.0.0.0/24,2001:db8::/64|unset")
+        self.assertFalse(canary.exists())
+
+    def test_iso_date_is_portable_utc(self):
+        self.assertRegex(self.helper("iso_date").stdout, r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+        for p in (self.root / "scripts").glob("*.sh"):
+            code = "\n".join(l for l in p.read_text().splitlines() if not l.lstrip().startswith("#"))
+            self.assertNotRegex(code, r"date -I|hostnamectl|\bss -[a-z]*p|tulpn", p.name)
 
 
 if __name__ == "__main__":
