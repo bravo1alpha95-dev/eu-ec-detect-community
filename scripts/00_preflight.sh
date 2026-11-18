@@ -53,12 +53,8 @@ else
   load_env .env || { echo "[preflight] ERROR: cannot load .env" >&2; exit 1; }
 fi
 
-# Informational only: operators must confirm the host is in authorized scope.
-if [[ -n "${EU_SCOPE_CIDR:-}" ]]; then
-  echo "[preflight] INFO: Configured EU_SCOPE_CIDR=${EU_SCOPE_CIDR}. Confirm this host is in authorized scope before collection."
-else
-  echo "[preflight] INFO: EU_SCOPE_CIDR is unset. Set it in .env to document the authorized address range."
-fi
+# Scope check with CIDR math (IPv4/IPv6). Advisory by default; EU_FAIL_CLOSED=1 blocks.
+eu_scope_check preflight
 
 if roe_authorized scope/roe.md; then
   echo "[preflight] INFO: ROE Status AUTHORIZED"

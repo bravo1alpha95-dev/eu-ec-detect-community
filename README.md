@@ -40,6 +40,8 @@ cp .env.example .env && chmod 600 .env
 
 That single command runs preflight, a full access-evidence collection, and a short summary. Nothing on the host is changed.
 
+Preflight checks, with CIDR math (IPv4 and IPv6), that at least one address on the host is inside `EU_SCOPE_CIDR` (comma-separated ranges are allowed). A mismatch is a warning by default; set `EU_FAIL_CLOSED=1` (in `.env` or the environment) to make a mismatch, an unset scope, or a host without the Linux `ip` command stop preflight and `easy-run.sh` with exit 4.
+
 Set `Status: AUTHORIZED` in `scope/roe.md` only after every `(fill)` field is completed and you have written authorization to operate on those systems. The apply script (`scripts/20_apply.sh`) refuses to mutate otherwise, even if `CONFIRM=yes` is set.
 
 ## What each script does

@@ -4,14 +4,10 @@ umask 077
 # Stable command output and byte-oriented redaction/JSON escaping.
 export LC_ALL=C
 
-# Portable ISO-like timestamp (prefers GNU -Is, falls back to common format).
+# Portable ISO 8601 UTC timestamp. POSIX date only: GNU `date -Is` does not exist on
+# macOS/BSD, and UTC keeps reports from different hosts comparable.
 iso_date() {
-  if date -Is >/dev/null 2>&1; then
-    date -Is
-  else
-    # BSD/macOS and many others
-    date +%Y-%m-%dT%H:%M:%S%z 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ
-  fi
+  date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
 # Parse .env as data (never `source` it): only KEY=value lines with a safe
@@ -37,7 +33,7 @@ load_env() {
       echo "[env] ignoring line with shell metacharacters for key '${key//[^A-Za-z0-9_]/?}' in $file" >&2
       continue
     fi
-    if [[ "$key" =~ ^(EU_[A-Z0-9_]+|ROLE)$ && "$val" =~ ^[A-Za-z0-9._/:@+-]*$ && ${#val} -le 256 ]]; then
+    if [[ "$key" =~ ^(EU_[A-Z0-9_]+|ROLE)$ && "$val" =~ ^[A-Za-z0-9._/:@+,-]*$ && ${#val} -le 256 ]]; then
       printf -v "$key" '%s' "$val"
     else
       echo "[env] ignoring malformed or oversized line for key '${key//[^A-Za-z0-9_]/?}' in $file" >&2
@@ -131,11 +127,16 @@ verify_checksum() {
   [[ "$expected" == "$actual  $base" || "$expected" == "$actual *$base" ]]
 }
 
+# file_mode FILE: octal permission bits, GNU stat (-c) or BSD/macOS stat (-f).
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
 # Every loader validates the same permissions, not only preflight.
 env_file_ok() {
   local perms
   [[ -f "$1" && ! -L "$1" && -O "$1" ]] || return 1
-  perms=$(stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null) || return 1
+  perms=$(file_mode "$1") || return 1
   [[ "$perms" == 600 || "$perms" == 400 ]]
 }
 
@@ -204,4 +205,293 @@ json_escape() {
     esac
   done
   printf '%s' "$out"
+}
+
+# ---------- CIDR math and network isolation (IPv4 + IPv6, pure bash) ----------
+# Replaces substring/regex matching on `ip route` text, which gave false
+# positives (192.0.20.0/24 "matches" the text 192.0.2.) and missed real overlaps
+# (10.0.0.0/8 overlaps 10.20.0.0/16 without sharing a text prefix).
+
+# Helpers return results in globals (_EU_BITS, _EU_LEN) instead of $(...) so the
+# route/address loops do not fork once per octet.
+_EU_NIB=(0000 0001 0010 0011 0100 0101 0110 0111 1000 1001 1010 1011 1100 1101 1110 1111)
+
+# _eu_hex_bits HEX WIDTH: append HEX (zero-padded to WIDTH bits) to _EU_BITS.
+_eu_hex_bits() {
+  local h=$1 i
+  while (( ${#h} * 4 < $2 )); do h=0$h; done
+  for (( i = 0; i < ${#h}; i++ )); do _EU_BITS+=${_EU_NIB[16#${h:i:1}]}; done
+}
+
+# _eu_ip_bits ADDR: set _EU_BITS to 32 (IPv4) or 128 (IPv6) bits; non-zero if invalid.
+_eu_ip_bits() {
+  local a=$1 g i n head tail hex
+  local -a hg=() tg=() groups=() v4=()
+  _EU_BITS=""
+  if [[ "$a" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    for i in 1 2 3 4; do
+      n=$(( 10#${BASH_REMATCH[i]} ))
+      (( n <= 255 )) || return 1
+      printf -v hex '%02x' "$n"
+      _eu_hex_bits "$hex" 8
+    done
+    return 0
+  fi
+  [[ "$a" == *:* && "$a" =~ ^[0-9A-Fa-f:.]+$ && "$a" != *:::* ]] || return 1
+  if [[ "$a" =~ ^(.*:)([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    head=${BASH_REMATCH[1]}
+    for i in 2 3 4 5; do
+      n=$(( 10#${BASH_REMATCH[i]} ))
+      (( n <= 255 )) || return 1
+      v4+=("$n")
+    done
+    printf -v a '%s%x:%x' "$head" "$(( v4[0] * 256 + v4[1] ))" "$(( v4[2] * 256 + v4[3] ))"
+  fi
+  [[ "$a" != *.* ]] || return 1
+  if [[ "$a" == *::* ]]; then
+    head=${a%%::*}
+    tail=${a#*::}
+    [[ "$tail" != *::* ]] || return 1
+    [[ -z "$head" ]] || IFS=: read -r -a hg <<< "$head"
+    [[ -z "$tail" ]] || IFS=: read -r -a tg <<< "$tail"
+    n=$(( 8 - ${#hg[@]} - ${#tg[@]} ))
+    (( n >= 1 )) || return 1
+    groups=("${hg[@]}")
+    for (( i = 0; i < n; i++ )); do groups+=(0); done
+    groups+=("${tg[@]}")
+  else
+    [[ "$a" != :* && "$a" != *: ]] || return 1
+    IFS=: read -r -a groups <<< "$a"
+  fi
+  (( ${#groups[@]} == 8 )) || return 1
+  for g in "${groups[@]}"; do
+    [[ "$g" =~ ^[0-9A-Fa-f]{1,4}$ ]] || { _EU_BITS=""; return 1; }
+    _eu_hex_bits "$g" 16
+  done
+}
+
+# _eu_cidr CIDR: set _EU_LEN and _EU_BITS (a bare address is a host prefix). "default"
+# is not accepted here; callers handle it.
+_eu_cidr() {
+  local c=$1 len
+  _eu_ip_bits "${c%%/*}" || return 1
+  if [[ "$c" == */* ]]; then
+    len=${c#*/}
+    [[ "$len" =~ ^[0-9]{1,3}$ ]] || return 1
+    len=$(( 10#$len ))
+    (( len <= ${#_EU_BITS} )) || return 1
+  else
+    len=${#_EU_BITS}
+  fi
+  _EU_LEN=$len
+}
+
+# cidr_valid CIDR: 0 if CIDR (or bare address) parses as IPv4 or IPv6.
+cidr_valid() { _eu_cidr "$1"; }
+
+# cidr_overlap A B: 0 if the two ranges share any address, 1 if not (or different
+# address families), 2 if either is invalid.
+cidr_overlap() {
+  local a pa p
+  _eu_cidr "$1" || return 2
+  a=$_EU_BITS pa=$_EU_LEN
+  _eu_cidr "$2" || return 2
+  (( ${#a} == ${#_EU_BITS} )) || return 1
+  p=$(( pa < _EU_LEN ? pa : _EU_LEN ))
+  [[ "${a:0:p}" == "${_EU_BITS:0:p}" ]]
+}
+
+# cidr_contains NET X: 0 if every address of X (CIDR or bare address) is inside NET.
+cidr_contains() {
+  local a pa
+  _eu_cidr "$1" || return 2
+  a=$_EU_BITS pa=$_EU_LEN
+  _eu_cidr "$2" || return 2
+  (( ${#a} == ${#_EU_BITS} && _EU_LEN >= pa )) || return 1
+  [[ "${a:0:pa}" == "${_EU_BITS:0:pa}" ]]
+}
+
+# cidr_list_contains LIST X: LIST is comma- or space-separated CIDRs.
+cidr_list_contains() {
+  local net
+  for net in ${1//,/ }; do cidr_contains "$net" "$2" && return 0; done
+  return 1
+}
+
+# cidr_list_overlaps LIST X: 0 if X overlaps any CIDR in LIST.
+cidr_list_overlaps() {
+  local net
+  for net in ${1//,/ }; do cidr_overlap "$net" "$2" && return 0; done
+  return 1
+}
+
+# _eu_skip_addr CIDR: loopback, IPv6 link-local and multicast never leave the host/link.
+_eu_skip_addr() {
+  cidr_contains 127.0.0.0/8 "$1" || cidr_contains ::1/128 "$1" ||
+    cidr_contains fe80::/10 "$1" || cidr_contains ff00::/8 "$1" || cidr_contains 224.0.0.0/4 "$1"
+}
+
+# Interface names used by common VPN and overlay clients.
+EU_VPN_IF_RE='^(tun|tap|wg|tailscale|zt|ppp|ipsec|vti|utun|nordlynx|proton|cscotun|gpd|mullvad|tun2socks)'
+
+# eu_host_addrs: "DEV CIDR" for each address on the host (Linux `ip`); non-zero if unavailable.
+eu_host_addrs() {
+  command -v ip >/dev/null 2>&1 || return 1
+  ip -o addr show 2>/dev/null | awk '$3 == "inet" || $3 == "inet6" {sub(/@.*/, "", $2); print $2, $4}'
+}
+
+# eu_routes: "DEST VIA DEV" per route (VIA "-" when directly connected); blackhole,
+# unreachable, prohibit and throw routes are dropped because they cannot carry traffic.
+eu_routes() {
+  command -v ip >/dev/null 2>&1 || return 1
+  { ip -4 route show 2>/dev/null; ip -6 route show 2>/dev/null; } | awk '
+    function emit(d, line,   i, n, f, via, dev) {
+      n = split(line, f, /[ \t]+/); via = "-"; dev = "-"
+      for (i = 1; i < n; i++) { if (f[i] == "via") via = f[i + 1]; if (f[i] == "dev") dev = f[i + 1] }
+      if (via == "inet6" || via == "inet") { for (i = 1; i < n; i++) if (f[i] == "via") via = f[i + 2] }
+      print d, via, dev
+    }
+    /^[ \t]+nexthop/ { if (dest != "") emit(dest, $0); next }
+    {
+      t = $1
+      if (t ~ /^(blackhole|unreachable|prohibit|throw)$/) { dest = ""; next }
+      if (t ~ /^(unicast|local|broadcast|multicast|anycast|nat)$/) { sub(/^[^ \t]+[ \t]+/, ""); }
+      dest = $1
+      if ($0 ~ / (via|dev) /) emit(dest, $0)
+    }'
+}
+
+# eu_isolation_check LAB_CIDRS [PROTECTED_CIDRS]: fail-closed lab isolation test.
+# Prints one "[isolation] FAIL: ..." line per problem (interface names only; no
+# addresses, since stdout often ends up in cron mail or CI logs) and returns 1 if any.
+eu_isolation_check() {
+  local lab=$1 prot=${2:-} fails=0 in_lab=0 dev cidr dest via net addrs routes
+  for net in ${lab//,/ } ${prot//,/ }; do
+    cidr_valid "$net" || { echo "[isolation] FAIL: invalid CIDR in EU_LAB_CIDRS/EU_PROTECTED_CIDRS"; return 1; }
+  done
+  [[ -n "${lab//[, ]/}" ]] || { echo "[isolation] FAIL: no lab CIDRs configured (EU_LAB_CIDRS)"; return 1; }
+  addrs=$(eu_host_addrs) || { echo "[isolation] FAIL: cannot list addresses (Linux 'ip' not found); isolation unverified"; return 1; }
+  routes=$(eu_routes) || { echo "[isolation] FAIL: cannot list routes (Linux 'ip' not found); isolation unverified"; return 1; }
+  while read -r dev cidr; do
+    [[ -n "$cidr" ]] || continue
+    cidr_valid "$cidr" || { echo "[isolation] FAIL: unparseable address on $dev"; fails=$((fails + 1)); continue; }
+    _eu_skip_addr "$cidr" && continue
+    if [[ "$dev" =~ $EU_VPN_IF_RE ]]; then
+      echo "[isolation] FAIL: VPN/overlay interface $dev is up with an address"; fails=$((fails + 1))
+    elif cidr_list_contains "$lab" "${cidr%%/*}"; then
+      in_lab=1
+    else
+      echo "[isolation] FAIL: interface $dev has an address outside the lab CIDRs (LAN/VPN/production leg)"; fails=$((fails + 1))
+    fi
+  done <<< "$addrs"
+  (( in_lab )) || { echo "[isolation] FAIL: no interface address inside the lab CIDRs"; fails=$((fails + 1)); }
+  while read -r dest via dev; do
+    [[ -n "$dest" ]] || continue
+    if [[ "$dev" =~ $EU_VPN_IF_RE ]]; then
+      echo "[isolation] FAIL: route via VPN/overlay interface $dev"; fails=$((fails + 1)); continue
+    fi
+    if [[ "$dest" == default ]]; then
+      if [[ "$via" == - ]] || ! cidr_list_contains "$lab" "$via"; then
+        echo "[isolation] FAIL: default route on $dev does not use a lab gateway"; fails=$((fails + 1))
+      fi
+      continue
+    fi
+    cidr_valid "$dest" || { echo "[isolation] FAIL: unparseable route on $dev"; fails=$((fails + 1)); continue; }
+    _eu_skip_addr "$dest" && continue
+    if [[ -n "${prot//[, ]/}" ]] && cidr_list_overlaps "$prot" "$dest"; then
+      echo "[isolation] FAIL: route on $dev overlaps EU_PROTECTED_CIDRS"; fails=$((fails + 1)); continue
+    fi
+    if [[ "$via" != - ]] && ! cidr_list_contains "$lab" "$via"; then
+      echo "[isolation] FAIL: route on $dev uses a gateway outside the lab CIDRs"; fails=$((fails + 1))
+    elif [[ "$via" == - ]] && ! cidr_list_overlaps "$lab" "$dest"; then
+      echo "[isolation] FAIL: directly connected non-lab network on $dev"; fails=$((fails + 1))
+    fi
+  done <<< "$routes"
+  (( fails == 0 ))
+}
+
+# eu_lab_cidrs: EU_LAB_CIDRS, else the lab subnets from .env (EU_HV_SUBNET,
+# EU_DOCKER_SUBNET, EU_AIRGAP_SUBNET). Empty means "not configured", which fails closed.
+eu_lab_cidrs() {
+  local l=${EU_LAB_CIDRS:-}
+  if [[ -z "$l" ]]; then
+    # shellcheck disable=SC2086  # load_env limits values to a safe charset; split on purpose
+    l=$(printf '%s,' ${EU_HV_SUBNET:-} ${EU_DOCKER_SUBNET:-} ${EU_AIRGAP_SUBNET:-})
+    l=${l%,}
+  fi
+  printf '%s' "$l"
+}
+
+# _eu_log_override WHO REASON FAILURES: append one line (no addresses) to
+# reports/isolation-override.log (600); a symlinked log is never followed.
+_eu_log_override() {
+  local log=reports/isolation-override.log
+  prepare_reports_dir reports 2>/dev/null || return 0
+  [[ -L "$log" || ( -e "$log" && ! -f "$log" ) ]] && { echo "[isolation] WARN: $log is not a regular file; override not logged" >&2; return 0; }
+  printf '%s %s user=%s host=%s reason=%s failures=%s\n' "$(iso_date)" "$1" "$(id -un)" \
+    "$(sanitize_host 2>/dev/null)" "$2" "$3" >> "$log"
+  chmod 600 "$log" 2>/dev/null || true
+}
+
+# eu_isolation_gate WHO: fail closed (exit 4) unless the host proves lab isolation.
+# Overrides, each announced and appended to reports/isolation-override.log:
+#   EU_ENV=prod|production  owned production host; the lab gate does not apply
+#   EU_ALLOW_UNISOLATED=1   run on a lab host anyway, despite the failures printed
+eu_isolation_gate() {
+  local who=$1 out
+  case "${EU_ENV:-}" in
+    prod|production)
+      echo "[$who] INFO: EU_ENV=${EU_ENV}: owned production host; lab isolation gate not applied (logged)."
+      _eu_log_override "$who" "EU_ENV=${EU_ENV}" 0
+      return 0 ;;
+  esac
+  if out=$(eu_isolation_check "$(eu_lab_cidrs)" "${EU_PROTECTED_CIDRS:-}"); then
+    echo "[$who] INFO: lab isolation verified (CIDR checks on every address and route)."
+    return 0
+  fi
+  printf '%s\n' "$out"
+  if [[ "${EU_ALLOW_UNISOLATED:-}" == 1 ]]; then
+    echo "[$who] WARN: EU_ALLOW_UNISOLATED=1 — continuing WITHOUT verified isolation (override logged)."
+    _eu_log_override "$who" EU_ALLOW_UNISOLATED=1 "$(printf '%s\n' "$out" | grep -c FAIL)"
+    return 0
+  fi
+  echo "[$who] ERROR: isolation check failed; refusing to continue (fail closed)." >&2
+  echo "[$who] Fix the interfaces/routes above or EU_LAB_CIDRS; on an owned production host set EU_ENV=prod;" >&2
+  echo "[$who] to run anyway set EU_ALLOW_UNISOLATED=1 (logged)." >&2
+  exit 4
+}
+
+# eu_scope_check WHO: is any host address inside EU_SCOPE_CIDR? Advisory by default;
+# EU_FAIL_CLOSED=1 turns a mismatch or an unverifiable scope into exit 4.
+eu_scope_check() {
+  local who=$1 scope=${EU_SCOPE_CIDR:-} net dev cidr addrs ok=0 msg=""
+  if [[ -z "$scope" ]]; then
+    echo "[$who] INFO: EU_SCOPE_CIDR is unset. Set it in .env to document the authorized address range."
+    [[ "${EU_FAIL_CLOSED:-}" == 1 ]] || return 0
+    msg="EU_SCOPE_CIDR is unset"
+  else
+    for net in ${scope//,/ }; do cidr_valid "$net" || msg="EU_SCOPE_CIDR is not a valid CIDR list"; done
+    if [[ -z "$msg" ]]; then
+      if addrs=$(eu_host_addrs); then
+        while read -r dev cidr; do
+          if [[ -n "$cidr" ]] && cidr_valid "$cidr" && ! _eu_skip_addr "$cidr" &&
+            cidr_list_contains "$scope" "${cidr%%/*}"; then
+            ok=1
+          fi
+        done <<< "$addrs"
+        (( ok )) || msg="no address on this host is inside EU_SCOPE_CIDR"
+      else
+        msg="cannot list host addresses (Linux 'ip' not found); scope unverified"
+      fi
+    fi
+    if [[ -z "$msg" ]]; then
+      echo "[$who] INFO: host has an address inside EU_SCOPE_CIDR."
+      return 0
+    fi
+  fi
+  if [[ "${EU_FAIL_CLOSED:-}" == 1 ]]; then
+    echo "[$who] ERROR: $msg; EU_FAIL_CLOSED=1, refusing to continue." >&2
+    exit 4
+  fi
+  echo "[$who] WARN: $msg. Confirm this host is in authorized scope (set EU_FAIL_CLOSED=1 to enforce)."
 }

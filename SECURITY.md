@@ -26,7 +26,7 @@ This is a community edition. There is no published SLA for response times. Descr
 4. **Over-redaction vs under-redaction**. Custom or obfuscated secrets may remain. Always human-review reports before external sharing.
 5. **Privilege**. Scripts prefer non-root but some visibility needs elevation. Run with least privilege; elevate only the collector if required.
 6. **Env-driven path components**. `ROLE` from `.env` is sanitized at use; still treat `.env` as sensitive (mode 600, owner-only).
-7. **Portability**. GNU sed is required by the redaction patterns (checked by preflight). Date formatting has GNU/BSD fallbacks.
+7. **Portability**. GNU sed is required by the redaction patterns (checked by preflight). Timestamps use POSIX `date -u +%Y-%m-%dT%H:%M:%SZ` (UTC) and file modes use GNU `stat -c` with a BSD `stat -f` fallback; no `date -Is` or `hostnamectl`. Isolation/scope checks need the Linux `ip` command and fail closed (lab) or warn (community, unless `EU_FAIL_CLOSED=1`) without it.
 8. **JSON injection**. Control bytes representable in Bash strings are escaped in `json_escape()`.
 
 ## External attack surface
