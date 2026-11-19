@@ -8,7 +8,7 @@ Status: DRAFT — do not run mutating jobs until Status is AUTHORIZED.
 
 - Org / env: (fill)
 - Project: eu-ec-detect-community
-- Authorized CIDR (`EU_SCOPE_CIDR`): (fill, for example 10.0.0.0/24 — replace with your range)
+- Authorized CIDR (`EU_SCOPE_CIDR`): (fill, for example 192.0.2.0/24 — replace with your range)
 - Focus: Access monitoring, inventory, and evidence collection for reporting and anomaly foundations on **owned systems only**.
 
 ## Authorization

@@ -7,7 +7,7 @@ Goal: Minimal daily or weekly effort while generating usable evidence and baseli
 1. Copy this project to a secure location on an operator host you control (or your workstation).
 2. `cd eu-ec-detect-community`
 3. `cp .env.example .env && chmod 600 .env`
-4. Edit the `EU_*` values in `.env` for your owned environment. Set `EU_SCOPE_CIDR` to your authorized range (the example `10.0.0.0/24` is a placeholder, not a real network you should assume is yours). No API key is used by these scripts.
+4. Edit the `EU_*` values in `.env` for your owned environment. Set `EU_SCOPE_CIDR` to your authorized range (the example `192.0.2.0/24` is a placeholder, not a real network you should assume is yours). No API key is used by these scripts.
 5. Fill `scope/inventory.md` with the hosts you own and intend to monitor.
 6. Open `scope/roe.md`. Fill requester, window, contacts, and every `(fill)` field. Replace the Status line with exactly `Status: AUTHORIZED` only once you confirm these are your owned systems and you have written authorization. Save.
 7. Run the easy path (read-only; AUTHORIZED status is not required for collection):

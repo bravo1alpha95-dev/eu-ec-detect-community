@@ -32,7 +32,7 @@ See **[EASY-STEPS.md](EASY-STEPS.md)** for the lowest-effort path.
 ```bash
 cp .env.example .env && chmod 600 .env
 # Edit .env: set EU_SCOPE_CIDR to the authorized range of systems you own
-# (the 10.0.0.0/24 value in .env.example is a placeholder).
+# (the 192.0.2.0/24 value in .env.example is a placeholder).
 # Edit scope/inventory.md and scope/roe.md for your environment.
 # Collection is read-only and does not require AUTHORIZED status.
 ./scripts/easy-run.sh
