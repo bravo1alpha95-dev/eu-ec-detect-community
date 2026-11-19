@@ -413,8 +413,9 @@ class Regressions(unittest.TestCase):
         self.assertEqual(self.helper("cidr_valid 1::2::3").returncode, 1)
 
     def test_scope_check_advisory_and_fail_closed(self):
-        # .env.example scope is 10.0.0.0/24; 10.0.0.100 shares the text prefix "10.0.0.1".
-        self.ip_stub("1: lo inet 127.0.0.1/8 scope host lo\n2: eth0 inet 10.0.1.5/24 scope global eth0\n")
+        # .env.example scope is the RFC 5737 placeholder 192.0.2.0/24, so a typical
+        # private LAN address must not satisfy it; 192.0.2.100 shares the text prefix "192.0.2.1".
+        self.ip_stub("1: lo inet 127.0.0.1/8 scope host lo\n2: eth0 inet 10.0.0.5/24 scope global eth0\n")
         result = self.run_script("00_preflight.sh")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("WARN: no address on this host is inside EU_SCOPE_CIDR", result.stdout)
@@ -422,7 +423,7 @@ class Regressions(unittest.TestCase):
         self.assertEqual(result.returncode, 4)
         self.assertIn("EU_FAIL_CLOSED=1", result.stderr)
         self.assertNotEqual(self.run_script("easy-run.sh", EU_FAIL_CLOSED="1").returncode, 0)
-        self.ip_stub("2: eth0 inet 10.0.0.100/24 scope global eth0\n")
+        self.ip_stub("2: eth0 inet 192.0.2.100/24 scope global eth0\n")
         result = self.run_script("00_preflight.sh", EU_FAIL_CLOSED="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("inside EU_SCOPE_CIDR", result.stdout)
